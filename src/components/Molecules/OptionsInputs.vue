@@ -24,6 +24,7 @@
 
 <script>
 import io from "socket.io-client";
+import { api_url, backend_port } from "../../config";
 
 export default {
   name: "OptionsInputs",
@@ -31,7 +32,7 @@ export default {
     return {
       newOption: "",
       optionState: null,
-      socket: io("localhost:3000")
+      socket: io(`${api_url}:${backend_port}`)
     };
   },
   props: ["roomNumber", "optionList"],
@@ -42,11 +43,7 @@ export default {
         this.optionState = false;
         return;
       }
-      console.log("submitting");
       const { roomNumber, newOption } = this;
-      // axios.post("http://localhost:3000/options/add/", { roomNumber, newOption }).then(res => {
-      //   console.log(res.data);
-      // });
       this.socket.emit("ADD_OPTION", {
         roomNumber,
         newOption
@@ -86,11 +83,11 @@ export default {
   font-weight: 700;
 }
 @media (max-width: 400px) {
-    .option-info {
+  .option-info {
     flex-wrap: wrap-reverse;
   }
   .option-input {
-    margin-top:1em;
+    margin-top: 1em;
   }
 }
 </style>

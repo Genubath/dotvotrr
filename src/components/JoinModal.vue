@@ -32,12 +32,14 @@
           required
         ></b-form-input>
       </b-form-group>
+      <div v-if="showRoomNumberError" class="roomNotFound">That room wasn't found :(</div>
     </form>
   </b-modal>
 </template>
 
 <script>
 import axios from "axios";
+import { api_url, backend_port } from "../config";
 
 export default {
   name: "JoinModal",
@@ -46,7 +48,8 @@ export default {
       userName: "",
       nameState: null,
       roomNumber: "",
-      roomNumberState: null
+      roomNumberState: null,
+      showRoomNumberError: false
     };
   },
   props: ["modalShow", "closeModal"],
@@ -74,13 +77,16 @@ export default {
         return;
       }
       axios
-        .get(`http://localhost:3000/NewRoom/${this.roomNumber}`)
+        .get(`http://${api_url}:${backend_port}/NewRoom/${this.roomNumber}`)
         .then(res => {
-          console.log("loaded existing room");
-          this.setRoomInfo(res.data.roomNumber);
+          if (res.data === false) {
+            this.showRoomNumberError = true;
+          } else {
+            console.log("loaded existing room");
+            this.setRoomInfo(res.data.roomNumber);
+            this.closeModal();
+          }
         });
-
-      this.closeModal();
     },
     setRoomInfo(roomNumber) {
       this.$store.commit("setRoom", roomNumber);
@@ -97,4 +103,7 @@ export default {
 
 
 <style scoped>
+.roomNotFound {
+  color: red;
+}
 </style>
