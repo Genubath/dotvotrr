@@ -3,13 +3,17 @@ const app = express();
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const { RoomStatuses } = require("../enums");
-var schedule = require("node-schedule");
+const schedule = require("node-schedule");
 const mongoose = require("mongoose");
+const history = require("connect-history-api-fallback");
+const { nameChanger } = require("./nameChanger");
+
 const OptionModel = require("./models/Option");
 const UserModel = require("./models/User");
 const RoomModel = require("./models/Room");
 
 const PORT = process.env.PORT || 3000;
+app.use(history());
 
 app.use(cors());
 app.use(bodyParser.json());
@@ -31,18 +35,22 @@ schedule.scheduleJob("00 * * * *", function() {
   cutoff.setHours(cutoff.getHours() - 3);
   console.log(
     "roomcount before: ",
-    RoomModel.estimatedDocumentCount().exec((err, res) => {
-      return res;
-    })
+    RoomModel.estimatedDocumentCount()
+      .lean()
+      .exec((err, res) => {
+        return res;
+      })
   );
   RoomModel.deleteMany({ createdAtDate: { $lt: cutoff } }, err => {
     console.log(err);
   }).then(() =>
     console.log(
       "roomcount after: ",
-      RoomModel.estimatedDocumentCount().exec((err, res) => {
-        return res;
-      })
+      RoomModel.estimatedDocumentCount()
+        .lean()
+        .exec((err, res) => {
+          return res;
+        })
     )
   );
 });
@@ -53,24 +61,36 @@ app.get("/", (req, res) => {
   res.sendFile(path.resolve("../dist/index.html"));
 });
 
+const generateRoomNumber = () => {
+  let newRoomNumber;
+  do {
+    newRoomNumber = Math.floor(1000 + Math.random() * 9000);
+  } while (Rooms.filter(rm => rm.roomNumber === newRoomNumber).length !== 0);
+  return newRoomNumber;
+};
+
 const roomRoutes = express.Router();
 app.use("/NewRoom", roomRoutes);
 roomRoutes.route("/").post((req, res) => {
   const RoomName = req.body.RoomName;
-  const adminName = req.body.UserName;
+  const adminName = nameChanger(req.body.UserName);
   const votesPerPerson = req.body.selectedVoteNumber;
-  const roomNumber = Math.floor(1000 + Math.random() * 9000).toString();
   const newRoom = {
     roomName: RoomName,
     adminName: adminName,
     votesPerPerson: votesPerPerson,
-    roomNumber: roomNumber,
+    roomNumber: generateRoomNumber(),
     roomStatus: RoomStatuses.addingOptions,
     options: [],
     users: []
   };
   RoomModel.create(newRoom);
   res.json(newRoom);
+});
+
+roomRoutes.route("/").get((req, res) => {
+  const path = require("path");
+  res.sendFile(path.resolve("../dist/index.html"));
 });
 
 roomRoutes.route("/:roomNumber").get((req, res) => {
@@ -88,26 +108,6 @@ roomRoutes.route("/:roomNumber").get((req, res) => {
   }
 });
 
-// const optionsRoute = express.Router();
-// app.use("/options", optionsRoute);
-// optionsRoute.route("/add").post((req, res) => {
-//   const { newOption, roomNumber } = req.body;
-//   const foundRoom = Rooms.find(
-//     room => room.roomNumber === parseInt(roomNumber)
-//   );
-//   const updatedOptions = {
-//     ...foundRoom.options,
-//     newOption
-//   };
-//   const updatedRoom = {
-//     ...foundRoom,
-//     options: updatedOptions
-//   };
-//   Rooms = Rooms.filter(rm => rm.roomNumber !== roomNumber);
-//   Rooms.push(updatedRoom);
-//   res.json("Success");
-// });
-
 const resultBuilder = roomNumber => {
   const foundRoom = RoomModel.find({ roomNumber: parseInt(roomNumber) })
     .lean()
@@ -123,14 +123,15 @@ const resultBuilder = roomNumber => {
     return retValue;
   }, []);
 
-  return foundRoom.options
+  const result = foundRoom.options
     .map(opt => {
       return {
         name: opt,
         count: combinedVotes.filter(cv => cv === opt).length
       };
     })
-    .sort((a, b) => a.count < b.count);
+    .sort((a, b) => b.count - a.count);
+  return result;
 };
 
 const server = app.listen(PORT, function() {
@@ -141,6 +142,7 @@ const io = require("socket.io")(server);
 io.on("connection", function(socket) {
   socket.on("join", function(data) {
     const { roomNumber, userName, effectiveUUID } = data;
+    const editedName = nameChanger(userName);
     console.log("joining room: ", roomNumber);
     socket.join(roomNumber);
     const foundRoom = RoomModel.find({ roomNumber: parseInt(roomNumber) })
@@ -157,7 +159,7 @@ io.on("connection", function(socket) {
     const foundUser = foundRoom.users.find(u => u.UUID === effectiveUUID);
     if (!foundUser) {
       let isNameGood = false;
-      let nameBuilder = userName;
+      let nameBuilder = editedName;
       let i = 2;
       while (!isNameGood) {
         if (
@@ -165,7 +167,7 @@ io.on("connection", function(socket) {
         ) {
           isNameGood = true;
         } else {
-          nameBuilder = userName + "(" + i + ")";
+          nameBuilder = editedName + "(" + i + ")";
           i = i + 1;
         }
       }
@@ -191,17 +193,18 @@ io.on("connection", function(socket) {
   socket.on("ADD_OPTION", function(data) {
     console.log("adding option");
     const { newOption, roomNumber } = data;
+    const editedNewOption = nameChanger(newOption);
     const foundRoom = Rooms.find(
       room => room.roomNumber === parseInt(roomNumber)
     );
     if (!foundRoom) {
       return;
     }
-    if (foundRoom.options.filter(op => op === newOption).length !== 0) {
+    if (foundRoom.options.filter(op => op === editedNewOption).length !== 0) {
       return;
     }
     console.log("old Options", foundRoom.options);
-    const updatedOptions = [...foundRoom.options, newOption];
+    const updatedOptions = [...foundRoom.options, editedNewOption];
     const updatedRoom = {
       ...foundRoom,
       options: updatedOptions

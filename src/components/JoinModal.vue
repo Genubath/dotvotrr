@@ -12,7 +12,7 @@
     <form ref="form" @submit.stop.prevent="handleSubmit">
       <b-form-group
         :state="nameState"
-        label="Name"
+        label="Your Name"
         label-for="name-input"
         invalid-feedback="Name is required"
       >
@@ -82,7 +82,6 @@ export default {
           if (res.data === false) {
             this.showRoomNumberError = true;
           } else {
-            console.log("loaded existing room");
             this.setRoomInfo(res.data.roomNumber);
             this.closeModal();
           }
