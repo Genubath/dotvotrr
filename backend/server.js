@@ -4,20 +4,47 @@ const bodyParser = require("body-parser");
 const cors = require("cors");
 const { RoomStatuses } = require("../enums");
 var schedule = require("node-schedule");
+const mongoose = require("mongoose");
+const OptionModel = require("./models/Option");
+const UserModel = require("./models/User");
+const RoomModel = require("./models/Room");
 
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(bodyParser.json());
 
+const dbUrl = process.env.DB_URL || "mongodb://127.0.0.1:27017";
+
+mongoose.connect(`${dbUrl}/${process.env.DB}`, { useNewUrlParser: true });
+var db = mongoose.connection;
+db.on("error", console.error.bind(console, "connection error:"));
+db.once("open", function() {
+  console.log("Connected to database");
+  // we're connected!
+});
+
 let Rooms = [];
 
-const ONE_HOUR = 60 * 60 * 1000;
 schedule.scheduleJob("00 * * * *", function() {
-  const now = new Date();
-  console.log("roomcount before: ", Rooms.length);
-  Rooms = Rooms.filter(rm => now - rm.createdAtDate > ONE_HOUR * 3);
-  console.log("roomcount after: ", Rooms.length);
+  var cutoff = new Date();
+  cutoff.setHours(cutoff.getHours() - 3);
+  console.log(
+    "roomcount before: ",
+    RoomModel.estimatedDocumentCount().exec((err, res) => {
+      return res;
+    })
+  );
+  RoomModel.deleteMany({ createdAtDate: { $lt: cutoff } }, err => {
+    console.log(err);
+  }).then(() =>
+    console.log(
+      "roomcount after: ",
+      RoomModel.estimatedDocumentCount().exec((err, res) => {
+        return res;
+      })
+    )
+  );
 });
 
 app.use("/", express.static("../dist"));
@@ -32,24 +59,28 @@ roomRoutes.route("/").post((req, res) => {
   const RoomName = req.body.RoomName;
   const adminName = req.body.UserName;
   const votesPerPerson = req.body.selectedVoteNumber;
-  const roomNumber = Math.floor(1000 + Math.random() * 9000);
+  const roomNumber = Math.floor(1000 + Math.random() * 9000).toString();
   const newRoom = {
-    RoomName,
-    adminName,
-    votesPerPerson,
-    roomNumber,
+    roomName: RoomName,
+    adminName: adminName,
+    votesPerPerson: votesPerPerson,
+    roomNumber: roomNumber,
     roomStatus: RoomStatuses.addingOptions,
     options: [],
-    users: [],
-    totalVotes: 0,
-    createdAtDate: new Date()
+    users: []
   };
-  Rooms.push(newRoom);
+  RoomModel.create(newRoom);
   res.json(newRoom);
 });
+
 roomRoutes.route("/:roomNumber").get((req, res) => {
-  const roomNumber = parseInt(req.params.roomNumber);
-  const foundRoom = Rooms.find(room => room.roomNumber === roomNumber);
+  const foundRoom = RoomModel.find({
+    roomNumber: parseInt(req.params.roomNumber)
+  })
+    .lean()
+    .exec((err, room) => {
+      return JSON.stringify(room);
+    });
   if (!foundRoom) {
     res.json(false);
   } else {
@@ -78,7 +109,11 @@ roomRoutes.route("/:roomNumber").get((req, res) => {
 // });
 
 const resultBuilder = roomNumber => {
-  const foundRoom = Rooms.find(room => room.roomNumber === roomNumber);
+  const foundRoom = RoomModel.find({ roomNumber: parseInt(roomNumber) })
+    .lean()
+    .exec((err, room) => {
+      return JSON.stringify(room);
+    });
   if (!foundRoom) {
     return;
   }
@@ -108,7 +143,12 @@ io.on("connection", function(socket) {
     const { roomNumber, userName, effectiveUUID } = data;
     console.log("joining room: ", roomNumber);
     socket.join(roomNumber);
-    const foundRoom = Rooms.find(aRoom => aRoom.roomNumber === roomNumber);
+    const foundRoom = RoomModel.find({ roomNumber: parseInt(roomNumber) })
+      .lean()
+      .exec((err, room) => {
+        console.log(JSON.stringify(room));
+        return JSON.stringify(room);
+      });
 
     if (!foundRoom) {
       return;
@@ -201,7 +241,13 @@ io.on("connection", function(socket) {
 
   socket.on("ADD_VOTE", function(data) {
     const { roomNumber, option, UUID } = data;
-    const foundRoom = Rooms.find(aRoom => aRoom.roomNumber === roomNumber);
+    const foundRoom = RoomModel.find({
+      roomNumber: roomNumber
+    })
+      .lean()
+      .exec((err, room) => {
+        return JSON.stringify(room);
+      });
     if (!foundRoom) {
       console.log("no room found");
       return;
